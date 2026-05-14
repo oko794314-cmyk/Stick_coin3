@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stick Farm OS v6.0</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root { 
+            --p: #07FF; 
+            --bg: radial-gradient(circle at top, #0a1a2e 0%, #000000 100%);
+            --card: rgba(15, 15, 30, 0.9);
+            --t: #fff; --g: #00ff88; --r: #ff4444; 
+        }
+        * { box-sizing: border-box; font-family: 'Orbitron', sans-serif; outline: none; }
+        body { background: var(--bg); color: var(--t); margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        .glass { background: var(--card); backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; text-align: center; }
+
+        /* Авторизація */
+        #auth-screen { position: fixed; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .box { width: 85%; max-width: 320px; padding: 30px; }
+
+        /* Основний екран */
+        #app { display: none; flex-direction: column; height: 100vh; }
+        .header { padding: 15px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-size: 10px; border-bottom: 1px solid #111; }
+        .stat-val { display: block; color: var(--p); font-size: 13px; margin-top: 5px; }
+
+        input { width: 100%; padding: 12px; margin: 8px 0; background: #111; border: 1px solid #333; color: #fff; border-radius: 10px; }
+        button { width: 100%; padding: 14px; border: none; border-radius: 12px; font-weight: bold; background: var(--p); color: #000; cursor: pointer; transition: 0.2s; }
+
+        /* Кнопка Майнінгу */
+        .m-btn { width: 160px; height: 160px; border-radius: 50%; border: 6px solid var(--g); background: none; color: var(--g); font-size: 22px; margin: 40px auto; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.3s; }
+        .m-btn.active { border-color: var(--r); color: var(--r); box-shadow: 0 0 30px rgba(255,68,68,0.2); }
+
+        .view { flex: 1; padding: 20px; display: none; }
+        .view.on { display: block; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; } }
+
+        nav { display: flex; background: #000; border-top: 1px solid #111; }
+        .tab { flex: 1; padding: 15px 0; text-align: center; font-size: 10px; color: #555; cursor: pointer; }
+        .tab.on { color: var(--p); border-top: 2px solid var(--p); }
+
+        .card { padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+    <div id="auth-screen">
+        <div class="box glass">
+            <h2 style="margin-bottom: 20px;">STICK <span style="color:var(--p)">OS</span></h2>
+            <input type="text" id="u" placeholder="Логін">
+            <input type="password" id="p" placeholder="Пароль">
+            <button id="abtn">CONNECT</button>
+            <p id="tlink" style="margin-top:20px; font-size:10px; color:#555; cursor:pointer;">Створити нову ферму</p>
+        </div>
+    </div>
+
+    <div id="app">
+        <div class="header">
+            <div>БАЛАНС<span id="stat-bal" class="stat-val">0.00</span></div>
+            <div>NODES<span id="active-nodes" class="stat-val">0</span></div>
+            <div>SPEED<span id="stat-speed" class="stat-val">0x</span></div>
+        </div>
+
+        <div id="v-mine" class="view on" style="text-align:center;">
+            <h1 id="bal" style="font-size:3rem; margin: 30px 0; color: var(--p);">0.00000</h1>
+            <div id="mbtn" class="m-btn">START</div>
+            <p id="m-status" style="color:var(--g); font-size:11px; letter-spacing: 2px;">READY TO MINE</p>
+        </div>
+
+        <div id="v-social" class="view">
+            <h3 style="text-align:center;">LEADERBOARD</h3>
+            <div id="leaderboard"></div>
+        </div>
+
+        <div id="v-profile" class="view">
+            <h3 style="text-align:center;">SETTINGS</h3>
+            <div class="glass card"><span>ID:</span> <span id="prof-id" style="color:var(--p)">---</span></div>
+            <button onclick="logout()" style="background:var(--r); margin-top: 30px;">DISCONNECT</button>
+        </div>
+
+        <nav>
+            <div class="tab on" id="t-mine">MINE</div>
+            <div class="tab" id="t-social">TOP</div>
+            <div class="tab" id="t-profile">OS</div>
+        </nav>
+    </div>
+
+    <script>
+        const BID = "6a04f5aaadc21f119a979f14";
+        const KEY = "$2a$10$7yePq6PbDAjjMpk4.gfkWeIOrhlJpxaX7Io9/IM0FevWs37W5eaea";
+        let db, cur, cloud = 0, loc = 0, isM = false, isReg = false, loopT = null;
+        const BASE_RATE = 1 / 3600;
+        const AUTO_SAVE_INTERVAL = 30000; // 30 секунд
+        let autoSaveInterval = null;
+
+        window.onload = async function() {
+            try {
+                // ✅ ПОМИЛКА 1: Виправлено - добавлено try-catch для window.onload
+                const sU = localStorage.getItem('stk_u');
+                const sP = localStorage.getItem('stk_p');
+                
+                if (sU && sP) {
+                    // ✅ ПОМИЛКА 2: Виправлено - додано await для асинхронного login
+                    await login(sU, sP, true);
+                }
+
+                // ✅ ПОМИЛКА 3: Виправлено - додано перевірку елемента перед призначенням onclick
+                const tlink = document.getElementById('tlink');
+                if (tlink) {
+                    tlink.onclick = () => {
+                        isReg = !isReg;
+                        const title = document.querySelector('#auth-screen h2');
+                        const btn = document.getElementById('abtn');
+                        if (title) title.innerText = isReg ? "REGISTRY" : "STICK OS";
+                        if (btn) btn.innerText = isReg ? "CREATE" : "CONNECT";
+                    };
+                }
+
+                // ✅ ПОМИЛКА 8: Виправлено - додано перевірку елемента перед призначенням onclick
+                const abtn = document.getElementById('abtn');
+                if (abtn) {
+                    abtn.onclick = () => {
+                        const u = document.getElementById('u')?.value.trim().toLowerCase() || '';
+                        const p = document.getElementById('p')?.value.trim() || '';
+                        if (u && p) login(u, p, false);
+                    };
+                }
+
+                // ✅ ПОМИЛКА 8: Виправлено - додано перевірку для кнопки майнінгу
+                const mbtn = document.getElementById('mbtn');
+                if (mbtn) {
+                    mbtn.onclick = function() {
+                        if (!isM) {
+                            startM(false);
+                        } else {
+                            stopM();
+                        }
+                    };
+                }
+
+                // ✅ ПОМИЛКА 3: Виправлено - інітіалізація табуляції з перевірками
+                const tabs = ['t-mine', 't-social', 't-profile'];
+                const views = ['v-mine', 'v-social', 'v-profile'];
+                
+                tabs.forEach((tabId, idx) => {
+                    const tab = document.getElementById(tabId);
+                    if (tab) {
+                        tab.onclick = () => {
+                            // Видаляємо клас 'on' зі всіх табів та вьюшок
+                            tabs.forEach(id => {
+                                const t = document.getElementById(id);
+                                if (t) t.classList.remove('on');
+                            });
+                            views.forEach(id => {
+                                const v = document.getElementById(id);
+                                if (v) v.classList.remove('on');
+                            });
+                            // Додаємо клас 'on' до поточного табу та вьюшки
+                            tab.classList.add('on');
+                            const view = document.getElementById(views[idx]);
+                            if (view) view.classList.add('on');
+                        };
+                    }
+                });
+            } catch (e) {
+                console.error("Помилка ініціалізації:", e);
+            }
+        };
+
+        async function login(u, p, auto) {
+            try {
+                // ✅ ПОМИЛКА 4: Виправлено - додано перевірку HTTP статусу
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${BID}/latest`, { 
+                    headers: {"X-Master-Key": KEY, "X-Bin-Meta": "false"} 
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status} - Помилка підключення до сервера`);
+                }
+                
+                db = await res.json();
+                
+                // ✅ ПОМИЛКА 5: Виправлено - інітіалізація об'єкту користувачів
+                if (!db.record) db.record = {};
+                if (!db.record.users) db.record.users = {};
+                
+                db = db.record; // Вирівнювання структури
+
+                if (isReg) {
+                    // Реєстрація
+                    if (db.users[u]) return alert("Логін зайнятий!");
+                    db.users[u] = { password: p, balance: 0.0, active_nodes: 0, created: new Date().toISOString() };
+                    // ✅ ПОМИЛКА 18: ВИПРАВЛЕНО - передаємо об'єкт з record
+                    await forceSync({record: db});
+                    alert("Створено! Тепер ввійдіть.");
+                    location.reload();
+                    return;
+                }
+
+                // Вхід
+                // ✅ ПОМИЛКА 5: Виправлено - додано перевірку та значення за замовчуванням
+                if (db.users[u] && db.users[u].password == p) {
+                    cur = u;
+                    cloud = db.users[u].balance || 0;
+                    
+                    // ✅ ПОМИЛКА 6: Виправлено - перевірка елементів перед змінами
+                    const profId = document.getElementById('prof-id');
+                    if (profId) profId.innerText = u;
+                    
+                    const authScreen = document.getElementById('auth-screen');
+                    const appScreen = document.getElementById('app');
+                    
+                    if (authScreen) authScreen.style.display = 'none';
+                    if (appScreen) appScreen.style.display = 'flex';
+                    
+                    // Зберігаємо сесію
+                    localStorage.setItem('stk_u', u);
+                    localStorage.setItem('stk_p', p);
+                    
+                    // ✅ ПОМИЛКА 9: Виправлено - перевірка перед запуском майнінгу
+                    if (localStorage.getItem('m_on_' + cur) === 'true' && !isM) {
+                        startM(true); // true означає "тихий запуск"
+                    }
+                    
+                    upd();
+                    
+                    // ✅ ПОМИЛКА 15: Виправлено - автоматичне збереження кожні 30 секунд
+                    if (!autoSaveInterval) {
+                        autoSaveInterval = setInterval(() => {
+                            if (isM && cur) sync();
+                        }, AUTO_SAVE_INTERVAL);
+                    }
+                } else {
+                    if (!auto) alert("Невірні дані!");
+                    if (auto) {
+                        localStorage.clear();
+                        location.reload();
+                    }
+                }
+            } catch (e) {
+                // ✅ ПОМИЛКА 7 & 17: Виправлено - детальне логування помилок
+                console.error("Помилка зв'язку:", e.message || e);
+                if (!auto) alert("Помилка підключення: " + (e.message || "Невідома помилка"));
+            }
+        }
+
+        function startM(isSilent) {
+            // ✅ ПОМИЛКА 9: Виправлено - перевірка від подвійного запуску
+            if (isM || !cur) return;
+            
+            isM = true;
+            
+            // ✅ ПОМИЛКА 10: Виправлено - ініціалізація активних вузлів
+            if (!db.users[cur].active_nodes) db.users[cur].active_nodes = 0;
+            db.users[cur].active_nodes += 1;
+            
+            // Оновлюємо UI
+            const mbtn = document.getElementById('mbtn');
+            const mStatus = document.getElementById('m-status');
+            
+            if (mbtn) {
+                mbtn.innerText = "STOP";
+                mbtn.classList.add('active');
+            }
+            if (mStatus) mStatus.innerText = "MINING ACTIVE";
+            
+            // Зберігаємо стан
+            localStorage.setItem('m_on_' + cur, 'true');
+            
+            // Запускаємо loop
+            loop();
+            
+            // Відправляємо дані на сервер у фоні, якщо не тихий запуск
+            if (!isSilent) sync();
+        }
+
+        function stopM() {
+            // ✅ ПОМИЛКА 11: Виправлено - перевірка перед зупиненням
+            if (!isM || !cur) return;
+            
+            isM = false;
+            
+            // ✅ ПОМИЛКА 12 & 13: Виправлено - очистка таймаута
+            if (loopT) {
+                clearTimeout(loopT);
+                loopT = null;
+            }
+            
+            // Оновлюємо UI
+            const mbtn = document.getElementById('mbtn');
+            const mStatus = document.getElementById('m-status');
+            
+            if (mbtn) {
+                mbtn.innerText = "START";
+                mbtn.classList.remove('active');
+            }
+            if (mStatus) mStatus.innerText = "SYSTEM STOPPED";
+            
+            // Оновлюємо активні вузли
+            if (db.users[cur].active_nodes > 0) {
+                db.users[cur].active_nodes -= 1;
+            }
+            
+            localStorage.setItem('m_on_' + cur, 'false');
+            
+            // Синхронізуємо з сервером
+            sync();
+        }
+
+        function loop() {
+            if (isM) {
+                // Збільшуємо локальний баланс
+                loc += BASE_RATE;
+                upd();
+                // ✅ ПОМИЛКА 13: Виправлено - зберігаємо ID таймаута
+                loopT = setTimeout(loop, 1000);
+            }
+        }
+
+        function upd() {
+            // ✅ ПОМИЛКА 14: Виправлено - перевірка безпеки перед оновленням
+            if (!cur || !db || !db.users || !db.users[cur]) return;
+            
+            const nodes = db.users[cur].active_nodes || 0;
+            const balance = (cloud + loc).toFixed(5);
+            
+            // Оновлюємо UI з перевірками елементів
+            const bal = document.getElementById('bal');
+            if (bal) bal.innerText = balance;
+            
+            const statBal = document.getElementById('stat-bal');
+            if (statBal) statBal.innerText = (cloud + loc).toFixed(2);
+            
+            const activeNodes = document.getElementById('active-nodes');
+            if (activeNodes) activeNodes.innerText = nodes;
+            
+            const statSpeed = document.getElementById('stat-speed');
+            if (statSpeed) statSpeed.innerText = nodes + "x";
+        }
+
+        async function sync() {
+            // ✅ ПОМИЛКА 15: Виправлено - перевірка безпеки перед синхронізацією
+            if (!cur || !db || !db.users || !db.users[cur]) return;
+            
+            try {
+                // Копіюємо локальний прогрес у базу перед відправкою
+                db.users[cur].balance = cloud + loc;
+                
+                // ✅ ПОМИЛКА 16: Виправлено - перевірка HTTP статусу при синхронізації
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${BID}`, {
+                    method: "PUT", 
+                    headers: {"X-Master-Key": KEY, "Content-Type": "application/json"},
+                    body: JSON.stringify({record: db})
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`Sync HTTP ${res.status}`);
+                }
+                
+                // Після успішного збереження переносимо локальні коїни в "хмару"
+                cloud += loc;
+                loc = 0;
+                
+                console.log("✅ Синхронізація успішна");
+            } catch (e) {
+                // ✅ ПОМИЛКА 17: Виправлено - деталізоване логування помилок синхронізації
+                console.error("❌ Помилка синхронізації:", e.message || e);
+            }
+        }
+
+        async function forceSync(data) {
+            try {
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${BID}`, {
+                    method: "PUT",
+                    headers: {"X-Master-Key": KEY, "Content-Type": "application/json"},
+                    body: JSON.stringify(data)
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                console.log("✅ Примусова синхронізація успішна");
+            } catch (e) {
+                console.error("❌ Помилка примусової синхронізації:", e);
+            }
+        }
+
+        function logout() {
+            // ✅ Виправлено - очистка всіх таймерів перед виходом
+            if (loopT) clearTimeout(loopT);
+            if (autoSaveInterval) clearInterval(autoSaveInterval);
+            
+            localStorage.clear();
+            location.reload();
+        }
+    </script>
+</body>
+</html>
